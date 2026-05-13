@@ -443,65 +443,53 @@ def _is_tourist_area(destination_city: str) -> bool:
     return any(area in dest_lower for area in tourist_areas)
 
 
-def _calc_hotels(
-    city: str,
-    budget_level: str,
+def calculate_accommodation_costs(
     num_nights: int,
     num_people: int,
-    is_peak: bool
-) -> tuple[List[HotelOption], HotelOption]:
+    travel_style: str = "mid_range",
+    destination_city: Optional[str] = None,
+    is_peak_season: bool = False,
+) -> Dict[str, Any]:
+    """
+    Calculate accommodation costs using a room-based model.
+    Assumes 2 people per room (ceil division).
+    """
+    travel_style = travel_style.lower()
+    style_map = {"low": "budget", "medium": "mid_range", "high": "premium",
+                 "budget": "budget", "mid_range": "mid_range", "premium": "premium"}
+    style_key = style_map.get(travel_style, "mid_range")
 
-    raw_hotels = _get_hotels_for_city(city, budget_level)
+    rates = ACCOMMODATION_RATES[style_key]
 
-    terrain = _terrain_mult(city)
-    season = _season_mult(is_peak)
-    occupancy = _occupancy_mult()
+    # Pick a representative nightly rate for the tier
+    if style_key == "budget":
+        base_rate = rates["basic_hotel"]
+    elif style_key == "mid_range":
+        base_rate = rates["hotel_3star"]
+    else:
+        base_rate = rates["hotel_4star"]
 
-    # ROOM-BASED MODEL (single source of truth)
+    # Apply multipliers
+    if is_peak_season:
+        base_rate *= PEAK_SEASON_MULTIPLIER
+    if destination_city and _is_tourist_area(destination_city):
+        base_rate *= TOURIST_AREA_MULTIPLIER
+
+    # Room-based: 2 people per room
     num_rooms = max(1, math.ceil(num_people / 2))
+    total_cost = base_rate * num_nights * num_rooms
 
-    fallback_prices = {
-        "low": 2500,
-        "medium": 9000,
-        "high": 28000
+    return {
+        "price_per_night_per_room": round(base_rate, 2),
+        "num_rooms": num_rooms,
+        "num_nights": num_nights,
+        "total_cost": round(total_cost, 2),
+        "cost_per_person": round(total_cost / max(num_people, 1), 2),
+        "travel_style": travel_style,
+        "description": rates.get("description", ""),
+        "is_peak_season": is_peak_season,
     }
 
-    options: List[HotelOption] = []
-
-    for h in raw_hotels:
-        base = h.get("price_per_night", 0)
-        if not base:
-            base = fallback_prices.get(budget_level, 9000)
-
-        nightly_room_cost = base * terrain * season * occupancy
-
-        total_cost = nightly_room_cost * num_nights * num_rooms
-
-        options.append(HotelOption(
-            name=h.get("name", "Hotel"),
-            price_per_night=round(nightly_room_cost, 2),
-            price_total=round(total_cost, 2),
-            price_per_person=round(total_cost / max(num_people, 1), 2),
-            tier=budget_level,
-            is_peak_priced=is_peak,
-        ))
-
-    if not options:
-        base = fallback_prices.get(budget_level, 9000)
-        total_cost = base * num_nights * num_rooms
-
-        options = [HotelOption(
-            name="Standard Hotel",
-            price_per_night=base,
-            price_total=total_cost,
-            price_per_person=total_cost / max(num_people, 1),
-            tier=budget_level,
-            is_peak_priced=is_peak,
-        )]
-
-    recommended = min(options, key=lambda x: x.price_total)
-
-    return options, recommended
 
 def calculate_food_costs(
     num_days: int,

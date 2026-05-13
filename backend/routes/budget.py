@@ -259,6 +259,11 @@ def _calc_hotels(
     raw_hotels = _get_hotels_for_city(city, budget_level)
 
     season = _season_mult(is_peak)
+    terrain = _terrain_mult(city)
+
+    # ROOM-BASED MODEL: hotels charge per room, not per person
+    # Assume 2 people per room (standard twin/double)
+    num_rooms = max(1, math.ceil(num_people / 2))
 
     options: List[HotelOption] = []
 
@@ -275,17 +280,17 @@ def _calc_hotels(
         if not base or base <= 0:
             base = fallback_prices.get(budget_level, 9000)
 
-        # per person per night (your new model)
-        price_per_person_per_night = base * season
+        # Price per room per night (with season & terrain multipliers)
+        price_per_room_per_night = base * season * terrain
 
-        # TOTAL = per person × nights × travellers
-        total = price_per_person_per_night * num_nights * num_people
+        # TOTAL = per room × nights × number of rooms
+        total = price_per_room_per_night * num_nights * num_rooms
 
         options.append(HotelOption(
             name=h.get("name", "Hotel"),
-            price_per_night=round(price_per_person_per_night, 0),
+            price_per_night=round(price_per_room_per_night, 0),
             price_total=round(total, 0),
-            price_per_person=round(price_per_person_per_night * num_nights, 0),
+            price_per_person=round(total / max(num_people, 1), 0),
             tier=budget_level,
             is_peak_priced=is_peak,
         ))
@@ -294,15 +299,15 @@ def _calc_hotels(
 
         base = fallback_prices.get(budget_level, 9000)
 
-        price_per_person_per_night = base * season
-        total = price_per_person_per_night * num_nights * num_people
+        price_per_room_per_night = base * season * terrain
+        total = price_per_room_per_night * num_nights * num_rooms
 
         options = [
             HotelOption(
                 name="Standard Hotel",
-                price_per_night=round(price_per_person_per_night, 0),
+                price_per_night=round(price_per_room_per_night, 0),
                 price_total=round(total, 0),
-                price_per_person=round(price_per_person_per_night * num_nights, 0),
+                price_per_person=round(total / max(num_people, 1), 0),
                 tier=budget_level,
                 is_peak_priced=is_peak,
             )

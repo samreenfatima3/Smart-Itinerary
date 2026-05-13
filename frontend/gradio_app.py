@@ -659,7 +659,7 @@ def create_destination_map(destination: str, places: Optional[List[str]] = None)
     fig = go.Figure()
     
     # Add destination marker
-    fig.add_trace(go.Scattermapbox(
+    fig.add_trace(go.Scattermap(
         mode="markers+text",
         lat=[lat],
         lon=[lon],
@@ -668,7 +668,6 @@ def create_destination_map(destination: str, places: Optional[List[str]] = None)
         marker=dict(
             size=20,
             color="#0d9488",
-            symbol="marker"
         ),
         name="Destination",
         hovertemplate=f"<b>{destination.title()}</b><br>Your destination<extra></extra>"
@@ -684,7 +683,7 @@ def create_destination_map(destination: str, places: Optional[List[str]] = None)
         
         # Add markers for places with actual coordinates
         for place, (place_lat, place_lon) in place_coords_list:
-            fig.add_trace(go.Scattermapbox(
+            fig.add_trace(go.Scattermap(
                 mode="markers+text",
                 lat=[place_lat],
                 lon=[place_lon],
@@ -693,7 +692,6 @@ def create_destination_map(destination: str, places: Optional[List[str]] = None)
                 marker=dict(
                     size=15,
                     color="#0891b2",
-                    symbol="circle"
                 ),
                 name=place,
                 hovertemplate=f"<b>{place}</b><br>📍 Attraction/Place<extra></extra>",
@@ -709,8 +707,8 @@ def create_destination_map(destination: str, places: Optional[List[str]] = None)
         zoom_level = 11  # Zoom in more if just destination
     
     fig.update_layout(
-        mapbox=dict(
-            style="carto-positron",  # Free style that doesn't require token
+        map=dict(
+            style="carto-positron",
             center=dict(lat=lat, lon=lon),
             zoom=zoom_level
         ),
@@ -1757,10 +1755,10 @@ def call_generate_trip_itinerary(
     except ValueError:
         return "❌ Backend returned a non-JSON response."
 
-    return _format_trip_itinerary(data)
+    return _format_trip_itinerary(data, trip_request)
 
 
-def _format_trip_itinerary(data: Dict[str, Any]) -> str:
+def _format_trip_itinerary(data: Dict[str, Any], trip_request: Optional[Dict[str, Any]] = None) -> str:
     """Format TripItineraryResponse into a clean markdown string."""
     lines = []
     cs = data.get("cost_summary", {})
@@ -1775,12 +1773,55 @@ def _format_trip_itinerary(data: Dict[str, Any]) -> str:
 
     lines.append("## 💰 Estimated Cost Summary")
     lines.append("")
+    if trip_request:
+        origin = trip_request.get("origin", "")
+        destination = trip_request.get("destination", "")
+        td_days = int(trip_request.get("num_days", 0) or 0)
+        td_trav = int(trip_request.get("num_travelers", 1) or 1)
+        lines.append("### 🧳 Trip Details")
+        lines.append("")
+        lines.append("| | |")
+        lines.append("|---|---|")
+        if origin or destination:
+            lines.append(f"| 📍 **Route** | {origin} → {destination} |")
+        if td_days:
+            lines.append(f"| 📅 **Duration** | {td_days} day(s) |")
+        lines.append(f"| 👥 **Travelers** | {td_trav} person(s) |")
+        lines.append("")
+    lines.append("### 💵 Cost Breakdown")
+    lines.append("")
     lines.append("| | |")
     lines.append("|---|---|")
     lines.append(f"| 🏨 **Hotel** | {hotel_name} |")
-    lines.append(f"| | PKR {hotel_ppn:,.0f}/night × nights = **PKR {hotel_total:,.0f}** |")
+    if hotel_ppn > 0 and trip_request:
+        num_days = int(trip_request.get("num_days", 0) or 0)
+        num_travelers = int(trip_request.get("num_travelers", 1) or 1)
+        num_rooms = max(1, -(-num_travelers // 2))  # ceil division
+        lines.append(
+            f"| | PKR {hotel_ppn:,.0f}/room/night × {num_days} night(s) × {num_rooms} room(s) = **PKR {hotel_total:,.0f}** |"
+        )
+    elif hotel_ppn > 0:
+        ratio = round(hotel_total / hotel_ppn) if hotel_ppn else 0
+        lines.append(f"| | PKR {hotel_ppn:,.0f}/room/night × {ratio} (nights × rooms) = **PKR {hotel_total:,.0f}** |")
+    else:
+        lines.append(f"| | **PKR {hotel_total:,.0f}** |")
     lines.append(f"| 🚌 **Transport** | {transport_name} |")
-    lines.append(f"| | Total: **PKR {transport_total:,.0f}** |")
+    if trip_request:
+        num_travelers = int(trip_request.get("num_travelers", 1) or 1)
+        t_type = (cs.get("transport_name") or "").lower()
+        if "car" in t_type:
+            num_cars = max(1, -(-num_travelers // 4))  # ceil division
+            per_car = transport_total / num_cars if num_cars else transport_total
+            lines.append(
+                f"| | PKR {per_car:,.0f}/vehicle × {num_cars} vehicle(s) = **PKR {transport_total:,.0f}** |"
+            )
+        else:
+            per_person = transport_total / num_travelers if num_travelers else transport_total
+            lines.append(
+                f"| | PKR {per_person:,.0f}/person × {num_travelers} traveler(s) = **PKR {transport_total:,.0f}** |"
+            )
+    else:
+        lines.append(f"| | Total: **PKR {transport_total:,.0f}** |")
     lines.append(f"| 🧾 **TOTAL ESTIMATED COST** | **PKR {grand_total:,.0f}** |")
     lines.append("")
     lines.append(f"> ⚠️ {note}")
@@ -1967,7 +2008,6 @@ def build_interface() -> gr.Blocks:
                     travel_date = gr.DateTime(
                         label="📅 Travel Date",
                         info="Select your travel date from the calendar",
-                        container=False
                     )
 
                 submit_btn = gr.Button(
@@ -2098,7 +2138,6 @@ def build_interface() -> gr.Blocks:
                                 trip_start_date = gr.DateTime(
                                     label="🗓️ Start Date",
                                     info="Choose start date from calendar",
-                                    container=False,
                                 )
                         
                         trip_options_btn = gr.Button(

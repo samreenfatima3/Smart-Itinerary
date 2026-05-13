@@ -9,6 +9,7 @@ generate_trip_itinerary() → LLM generates day-by-day plan locked to selected h
 
 import asyncio
 import json
+import math
 import re
 from typing import Any, List, Optional
 
@@ -418,15 +419,17 @@ def get_transport_options(
     # ── CAR (vehicle-based pricing) ──────────────────────────────────────
     if car_fares:
         best = min(car_fares)
+        # Each car seats up to 4 people; need multiple cars for larger groups
+        num_cars = max(1, math.ceil(num_travelers / 4))
+        car_total = best * num_cars
 
         options.append(TransportOption(
             type="car",
-            provider="Private Car (Up to 4 persons, full vehicle)",
+            provider=f"Private Car ({num_cars} vehicle{'s' if num_cars > 1 else ''}, up to 4 persons each)",
 
-            # FIX: do NOT divide in a way that affects logic
-            price_per_person=round(best / 4, 2),  # fixed capacity assumption
+            price_per_person=round(car_total / max(num_travelers, 1), 2),
 
-            total_price=round(best, 2),
+            total_price=round(car_total, 2),
 
             duration=_format_duration(
                 distance_km / TRANSPORT_SPEEDS_KPH.get("Car Sedan + Driver", 70)
@@ -460,8 +463,11 @@ def calculate_cost_summary(
     hotel: HotelOption,
     transport: TransportOption,
     num_days: int,
+    num_travelers: int = 1,
 ) -> CostSummary:
-    hotel_total = round(hotel.price_per_night * num_days, 2)
+    # Hotels charge per room, not per person. Assume 2 people per room.
+    num_rooms = max(1, math.ceil(num_travelers / 2))
+    hotel_total = round(hotel.price_per_night * num_days * num_rooms, 2)
     total = round(hotel_total + transport.total_price, 2)
     transport_name = f"{transport.provider} ({transport.type.capitalize()})"
     return CostSummary(
@@ -627,7 +633,7 @@ async def generate_trip_itinerary(
     # Merge activity preferences from both places
     prefs = selection.activity_preferences or trip_req.activity_preferences or None
 
-    cost_summary = calculate_cost_summary(hotel, transport, trip_req.num_days)
+    cost_summary = calculate_cost_summary(hotel, transport, trip_req.num_days, trip_req.num_travelers)
 
     days = await asyncio.to_thread(
         _generate_itinerary_sync, trip_req, hotel, transport, prefs
